@@ -41,24 +41,26 @@ async def on_ready():
 
 
 @bot.command(name="tldr")
-async def tldr(ctx, *args):
+async def tldr(ctx, *, arg_string: str = None):
     """
     TLDR command to summarize Discord conversations.
 
     Usage:
-    !tldr -h [hours] -c [custom prompt] [-p]
-    !tldr -m [messages] -c [custom prompt] [-p]
+    !tldr -h [hours] [-p] [-c "Your custom prompt"]
+    !tldr -m [messages] [-p] [-c "Your custom prompt"]
     !tldr --help
     """
-    # Parse arguments
+    if arg_string is None:
+        await send_help(ctx)
+        return
+
     try:
-        # Use shlex to handle quoted strings properly
-        parsed_args = shlex.split(' '.join(args))
+        parsed_args = shlex.split(arg_string)
     except ValueError as e:
         await ctx.send(f"❌ Error parsing arguments: {str(e)}")
         return
 
-    # Initialize variables
+    # Initialize flags
     flags = {
         "-h": None,
         "-m": None,
@@ -67,38 +69,47 @@ async def tldr(ctx, *args):
     }
 
     if "--help" in parsed_args:
-        await help_command(ctx)
+        await send_help(ctx)
         return
 
-    # Iterate over parsed arguments
+    # Parsing logic
     i = 0
     while i < len(parsed_args):
         arg = parsed_args[i]
-        if arg in flags:
-            if arg == "-p":
-                flags["-p"] = True
-                i += 1
-            elif arg == "-c":
-                if i + 1 < len(parsed_args):
-                    flags["-c"] = parsed_args[i + 1]
-                    i += 2
-                else:
-                    await ctx.send("❌ The `-c` flag requires a value. Use `-c \"Your custom prompt here\"`.")
-                    return
+        if arg == "-h":
+            if i + 1 < len(parsed_args):
+                flags["-h"] = parsed_args[i + 1]
+                i += 2
             else:
-                if i + 1 < len(parsed_args):
-                    flags[arg] = parsed_args[i + 1]
-                    i += 2
-                else:
-                    await ctx.send(f"❌ The `{arg}` flag requires a value.")
-                    return
+                await ctx.send("❌ The `-h` flag requires a numerical value for hours.")
+                return
+        elif arg == "-m":
+            if i + 1 < len(parsed_args):
+                flags["-m"] = parsed_args[i + 1]
+                i += 2
+            else:
+                await ctx.send("❌ The `-m` flag requires a numerical value for messages.")
+                return
+        elif arg == "-c":
+            if i + 1 < len(parsed_args):
+                flags["-c"] = parsed_args[i + 1]
+                i += 2
+            else:
+                await ctx.send("❌ The `-c` flag requires a custom prompt.")
+                return
+        elif arg == "-p":
+            flags["-p"] = True
+            i += 1
+        elif arg == "--help":
+            await send_help(ctx)
+            return
         else:
             await ctx.send(f"❌ Unrecognized flag `{arg}`.")
             return
 
     # Validate flags
     if flags["-h"] and flags["-m"]:
-        await ctx.send("❌ Please use either `-h` or `-m`, not both.")
+        await ctx.send("❌ Please use either `-h` (hours) or `-m` (messages), not both.")
         return
     if not flags["-h"] and not flags["-m"]:
         await ctx.send("❌ You must specify either `-h [hours]` or `-m [messages]`.")
@@ -118,10 +129,11 @@ async def tldr(ctx, *args):
         elif flags["-m"]:
             limit = int(flags["-m"])
             messages = []
-            async for message in ctx.channel.history(limit=limit, oldest_first=True):
+            async for message in ctx.channel.history(limit=limit, oldest_first=False):
                 if message.author == bot.user:
                     continue
                 messages.append(f"{message.author}: {message.content}")
+            messages.reverse()
     except ValueError:
         await ctx.send("❌ Invalid number format for hours or messages.")
         return
@@ -137,23 +149,22 @@ async def tldr(ctx, *args):
     # Prepare the prompt for the Gemini API
     prompt = "\n".join(messages)
     if flags["-c"]:
-        summary_prompt = f"{SUMMARY_PROMPT}\n\n{prompt}\n\nCustom Question: {flags['-c']}"
+        summary_prompt = f"{SUMMARY_PROMPT}\n\nAdditionaly: {flags['-c']}\n\nConversation: {prompt}"
     else:
         summary_prompt = f"{SUMMARY_PROMPT}\n\n{prompt}"
 
     try:
         model = genai.GenerativeModel("gemini-1.5-flash")
-        generation_config={
-            "max_output_tokens": 2048,
+
+        generation_config = {
             "temperature": 0.5,
+            "max_output_tokens": 4096,
         }
+
         response = model.generate_content(
             summary_prompt,
-            generation_config=generation_config,
+            generation_config=generation_config
         )
-
-
-
         summary = response.text.strip()
     except Exception as e:
         print(e)
@@ -204,7 +215,7 @@ async def tldr_error(ctx, error):
         await ctx.send("❌ An error occurred while processing your request.")
 
 
-@bot.command(name="tldr_help")
+@bot.command(name="help")
 async def help_command(ctx):
     help_message = (
         "📄 **TLDR Bot Help** 📄\n\n"
@@ -217,7 +228,24 @@ async def help_command(ctx):
         "**Examples:**\n"
         "`!tldr -h 2` - Summarize the last 2 hours of conversation privately.\n"
         "`!tldr -m 50 -p` - Summarize the last 50 messages publicly in the channel.\n"
-        "`!tldr -h 1 -c \"What were the main decisions made?\"` - Summarize the last 1 hour of conversation with a specific focus."
+        "`!tldr -h 1 -c \"What were the main decisions made during this discussion?\"` - Summarize the last 1 hour of conversation with a specific focus."
+    )
+    await ctx.send(help_message)
+
+
+async def send_help(ctx):
+    help_message = (
+        "📄 **TLDR Bot Help** 📄\n\n"
+        "**Commands:**\n"
+        "`!tldr -h [hours]` - Get a summary of the last [hours] hours of the chat as a DM.\n"
+        "`!tldr -m [messages]` - Get a summary of the last [messages] messages as a DM.\n"
+        "`-c \"Your custom prompt\"` - Add a custom prompt to ask specific questions about the conversation.\n"
+        "`-p` flag can be added to post the summary in the channel instead of DM.\n"
+        "`!tldr --help` - Display this help message.\n\n"
+        "**Examples:**\n"
+        "`!tldr -h 2` - Summarize the last 2 hours of conversation privately.\n"
+        "`!tldr -m 50 -p` - Summarize the last 50 messages publicly in the channel.\n"
+        "`!tldr -h 1 -c \"What were the main decisions made during this discussion?\"` - Summarize the last 1 hour of conversation with a specific focus."
     )
     await ctx.send(help_message)
 
