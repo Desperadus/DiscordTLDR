@@ -1,0 +1,17 @@
+[tool.poetry]
+name = "discordtldr"
+version = "0.1.0"
+description = ""
+authors = ["Tomas Jelinek <tomgolf.jelinek@gmail.com>"]
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.12"
+discord-py = "^2.4.0"
+google-generativeai = "^0.8.3"
+python-dotenv = "^1.0.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
